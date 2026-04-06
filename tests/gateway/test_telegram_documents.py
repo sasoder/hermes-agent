@@ -24,6 +24,7 @@ from gateway.platforms.base import (
     SendResult,
     SUPPORTED_DOCUMENT_TYPES,
 )
+from gateway.run import GatewayRunner
 
 
 # ---------------------------------------------------------------------------
@@ -415,6 +416,67 @@ class TestMediaGroups:
 # ---------------------------------------------------------------------------
 # TestSendDocument — outbound file attachment delivery
 # ---------------------------------------------------------------------------
+
+class TestPreferredImageDelivery:
+    @pytest.mark.asyncio
+    async def test_process_message_routes_local_png_via_document_delivery(self, adapter, tmp_path):
+        png_path = tmp_path / "sprite.png"
+        png_path.write_bytes(b"\x89PNG\r\n\x1a\n" + b"fakepng")
+
+        adapter._message_handler = AsyncMock(return_value=f"MEDIA:{png_path}")
+        adapter._keep_typing = AsyncMock()
+        adapter._run_processing_hook = AsyncMock()
+        adapter._send_with_retry = AsyncMock(return_value=SendResult(success=True, message_id="text"))
+        adapter._bot = MagicMock()
+        adapter.send_document = AsyncMock(return_value=SendResult(success=True, message_id="doc"))
+
+        event = MessageEvent(
+            text="test",
+            message_type=MessageType.TEXT,
+            source=SimpleNamespace(chat_id="12345", thread_id=None),
+            message_id="1",
+        )
+
+        await adapter._process_message_background(event, session_key="telegram:12345")
+
+        adapter.send_document.assert_awaited_once()
+        assert adapter.send_document.await_args.kwargs["file_path"] == str(png_path)
+
+    @pytest.mark.asyncio
+    async def test_telegram_send_image_file_sends_png_as_document(self, adapter, tmp_path):
+        png_path = tmp_path / "sprite.png"
+        png_path.write_bytes(b"\x89PNG\r\n\x1a\n" + b"fakepng")
+
+        adapter._bot = MagicMock()
+        adapter.send_document = AsyncMock(return_value=SendResult(success=True, message_id="doc"))
+
+        result = await adapter.send_image_file(chat_id="12345", image_path=str(png_path))
+
+        assert result.success
+        adapter.send_document.assert_awaited_once()
+        assert adapter.send_document.await_args.kwargs["file_path"] == str(png_path)
+
+    @pytest.mark.asyncio
+    async def test_streaming_delivery_routes_local_png_via_document(self, adapter, tmp_path):
+        png_path = tmp_path / "streamed.png"
+        png_path.write_bytes(b"\x89PNG\r\n\x1a\n" + b"fakepng")
+
+        runner = object.__new__(GatewayRunner)
+        adapter._bot = MagicMock()
+        adapter.send_document = AsyncMock(return_value=SendResult(success=True, message_id="doc"))
+
+        event = MessageEvent(
+            text="test",
+            message_type=MessageType.TEXT,
+            source=SimpleNamespace(chat_id="12345", thread_id=None),
+            message_id="1",
+        )
+
+        await runner._deliver_media_from_response(str(png_path), event, adapter)
+
+        adapter.send_document.assert_awaited_once()
+        assert adapter.send_document.await_args.kwargs["file_path"] == str(png_path)
+
 
 class TestSendDocument:
     """Tests for TelegramAdapter.send_document() — sending files to users."""
