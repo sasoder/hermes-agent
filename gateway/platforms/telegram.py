@@ -1101,7 +1101,7 @@ class TelegramAdapter(BasePlatformAdapter):
         metadata: Optional[Dict[str, Any]] = None,
         **kwargs,
     ) -> SendResult:
-        """Send a local image file natively as a Telegram photo."""
+        """Send a local image file, preserving PNGs as original files."""
         if not self._bot:
             return SendResult(success=False, error="Not connected")
 
@@ -1109,6 +1109,15 @@ class TelegramAdapter(BasePlatformAdapter):
             import os
             if not os.path.exists(image_path):
                 return SendResult(success=False, error=f"Image file not found: {image_path}")
+
+            if os.path.splitext(image_path)[1].lower() == ".png":
+                return await self.send_document(
+                    chat_id=chat_id,
+                    file_path=image_path,
+                    caption=caption,
+                    reply_to=reply_to,
+                    metadata=metadata,
+                )
 
             _thread = metadata.get("thread_id") if metadata else None
             with open(image_path, "rb") as image_file:
@@ -1161,7 +1170,12 @@ class TelegramAdapter(BasePlatformAdapter):
                 )
             return SendResult(success=True, message_id=str(msg.message_id))
         except Exception as e:
-            print(f"[{self.name}] Failed to send document: {e}")
+            logger.error(
+                "[%s] Failed to send document: %s",
+                self.name,
+                e,
+                exc_info=True,
+            )
             return await super().send_document(chat_id, file_path, caption, file_name, reply_to)
 
     async def send_video(
